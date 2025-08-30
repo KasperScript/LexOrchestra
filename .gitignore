@@ -1,0 +1,10 @@
+.env
+lex_repo/
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+venv/
+.idea/
+.vscode/
+LexOrchestra.code-workspace
