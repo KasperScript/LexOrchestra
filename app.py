@@ -2,9 +2,10 @@ import os
 import re
 import time
 import json
-from datetime import datetime
 from typing import Dict, Tuple, List
 from pathlib import Path
+
+from vault import VaultManager
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -12,15 +13,14 @@ import google.generativeai as genai
 
 st.set_page_config(page_title="LexOrchestra Vault", layout="wide")
 
-load_dotenv()
+load_dotenv(Path.home() / ".config" / "api secrets" / "global.env")
 api_key = os.getenv("GEMINI_API_KEY")
 if not api_key:
-    st.error("Brak klucza API! Ustaw GEMINI_API_KEY w pliku .env")
+    st.error("Brak klucza API! Ustaw GEMINI_API_KEY w środowisku lub global.env")
     st.stop()
 
 genai.configure(api_key=api_key)
 
-REPO_ROOT = "lex_repo"
 TEMPLATES_ROOT = "lex_templates"
 
 DOC_TYPE_LABELS = {
@@ -31,126 +31,6 @@ DOC_TYPE_LABELS = {
 }
 
 
-class VaultManager:
-    DOC_TYPES = ("raw", "anonymized", "analysis", "email")
-
-    def __init__(self, root_dir: str = REPO_ROOT):
-        self.root = Path(root_dir)
-        self.root.mkdir(exist_ok=True)
-
-    def get_clients(self) -> List[str]:
-        return [d.name for d in self.root.iterdir() if d.is_dir()]
-
-    def ensure_client_folder(self, client_name: str) -> Path:
-        client_path = self.root / client_name
-        client_path.mkdir(exist_ok=True)
-        for sub in self.DOC_TYPES:
-            (client_path / sub).mkdir(exist_ok=True)
-        return client_path
-
-    def save_document(
-        self,
-        client_name: str,
-        doc_type: str,
-        content: str,
-        extension: str = "txt",
-        label: str = "",
-    ) -> str:
-        client_path = self.ensure_client_folder(client_name)
-
-        if doc_type not in self.DOC_TYPES:
-            subdir = client_path / "other"
-            subdir.mkdir(exist_ok=True)
-        else:
-            subdir = client_path / doc_type
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        if label:
-            slug = label.lower().replace(" ", "-")
-            slug = re.sub(r"[^a-z0-9_-]", "", slug)
-            slug = slug.strip("-")
-            if slug:
-                filename = f"{timestamp}_{doc_type}_{slug}.{extension}"
-            else:
-                filename = f"{timestamp}_{doc_type}.{extension}"
-        else:
-            filename = f"{timestamp}_{doc_type}.{extension}"
-
-        file_path = subdir / filename
-
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        return str(file_path)
-
-    def get_client_files(self, client_name: str) -> Dict[str, List[str]]:
-        client_path = self.root / client_name
-        if not client_path.exists():
-            return {}
-
-        result: Dict[str, List[str]] = {}
-        for sub in client_path.iterdir():
-            if sub.is_dir():
-                files = sorted([f.name for f in sub.iterdir() if f.is_file()])
-                if files:
-                    result[sub.name] = files
-        return result
-
-    def read_document(self, client_name: str, doc_type: str, filename: str) -> str:
-        client_path = self.root / client_name
-        if doc_type in self.DOC_TYPES:
-            subdir = client_path / doc_type
-        else:
-            subdir = client_path / "other"
-        path = subdir / filename
-        if path.exists() and path.is_file():
-            return path.read_text(encoding="utf-8")
-        return ""
-
-    def list_recent_documents(self, client_name: str, limit: int = 10) -> List[Dict[str, str]]:
-        client_path = self.root / client_name
-        if not client_path.exists():
-            return []
-
-        entries = []
-        for doc_type in self.DOC_TYPES:
-            subdir = client_path / doc_type
-            if subdir.exists() and subdir.is_dir():
-                for file in subdir.iterdir():
-                    if file.is_file():
-                        name = file.name
-                        parts = name.split("_", 1)
-                        timestamp_str = parts[0] if parts else ""
-                        dt = None
-                        try:
-                            dt = datetime.strptime(timestamp_str, "%Y%m%d")
-                        except ValueError:
-                            pass
-                        entries.append({
-                            "doc_type": doc_type,
-                            "filename": name,
-                            "path": str(file),
-                            "timestamp": timestamp_str,
-                            "dt": dt,
-                        })
-
-        entries.sort(key=lambda x: (x["dt"] is None, x["dt"]), reverse=True)
-        entries.sort(key=lambda x: x["dt"] is None)
-        entries_with_dt = [e for e in entries if e["dt"] is not None]
-        entries_without_dt = [e for e in entries if e["dt"] is None]
-        entries_with_dt.sort(key=lambda x: x["dt"], reverse=True)
-        sorted_entries = entries_with_dt + entries_without_dt
-
-        result = []
-        for e in sorted_entries[:limit]:
-            result.append({
-                "doc_type": e["doc_type"],
-                "filename": e["filename"],
-                "path": e["path"],
-                "timestamp": e["timestamp"],
-            })
-        return result
 
 
 def ask_llm(system_prompt: str, user_prompt: str) -> str:
@@ -488,10 +368,14 @@ def render_sidebar(vault: VaultManager):
         new_client = st.sidebar.text_input("Nazwa klienta")
         if st.sidebar.button("Utwórz folder"):
             if new_client:
-                vault.ensure_client_folder(new_client)
-                st.sidebar.success(f"Utworzono klienta: {new_client}")
-                st.session_state["tool"] = "HOME"
-                st.rerun()
+                try:
+                    vault.ensure_client_folder(new_client)
+                except ValueError as exc:
+                    st.sidebar.error(str(exc))
+                else:
+                    st.sidebar.success(f"Utworzono klienta: {new_client}")
+                    st.session_state["tool"] = "HOME"
+                    st.rerun()
     else:
         clients = vault.get_clients()
         if clients:

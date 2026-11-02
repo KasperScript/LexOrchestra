@@ -20,18 +20,13 @@ Static demo inputs live in `examples/lex_repo_demo/` and include raw contract sa
 2) Install dependencies:
 
 ```bash
-pip install streamlit python-dotenv google-generativeai
+pip install -r requirements.txt
 ```
 
 ## Environment variables
 
-1) Copy the example file and set your real values:
-
-```bash
-cp .env.example .env
-```
-
-2) Edit `.env` and provide values for the listed variables.
+Set `GEMINI_API_KEY` in the process environment or in the shared secret store
+`~/.config/api secrets/global.env`. Do not commit real credentials.
 
 ## Run
 
@@ -41,5 +36,23 @@ streamlit run app.py
 
 ## Troubleshooting
 
-- If you see `Brak klucza API`, make sure `GEMINI_API_KEY` is set in `.env`.
+- If you see `Brak klucza API`, make sure `GEMINI_API_KEY` is set in the process environment or shared secret store.
 - If imports fail, confirm the dependencies are installed in your active environment.
+
+## Prototype scope and offline checks
+
+This is a local demo, with no authentication or access controls. Generated drafts,
+risk reports, and regex anonymization require human review; anonymization is not a
+privacy guarantee. Do not submit confidential or real client data. Gemini calls
+send text to an external service and may incur costs. The legacy Gemini SDK is
+retained for this prototype; live API compatibility is not verified by offline CI.
+
+The vault rejects path traversal and preserves repeated saves with unique filenames.
+It assumes trusted local filesystem access, not a hostile multi-user environment.
+
+```sh
+python -m unittest discover -s tests -v
+python -m compileall -q app.py vault.py
+```
+
+Tests use temporary directories and require neither an API key nor external packages.
